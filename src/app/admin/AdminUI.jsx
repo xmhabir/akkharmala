@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { CldUploadWidget } from 'next-cloudinary';
 
 const C = {
   bg: '#0d0f18', surface: '#161925', surfaceHi: '#1e2235',
@@ -62,31 +63,114 @@ function Modal({ title, onClose, children }) {
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 const primary = { background: C.accent, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s', whiteSpace: 'nowrap' };
-const ghost   = { background: 'transparent', color: C.mutedHi, border: `1px solid ${C.border}`, borderRadius: 10, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.15s', whiteSpace: 'nowrap' };
-const input   = { background: C.surfaceHi, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 13, padding: '10px 14px', outline: 'none', width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', transition: 'border-color 0.2s' };
-const focus   = (e) => { e.target.style.borderColor = C.accent; };
-const blur    = (e) => { e.target.style.borderColor = C.border; };
+const ghost = { background: 'transparent', color: C.mutedHi, border: `1px solid ${C.border}`, borderRadius: 10, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.15s', whiteSpace: 'nowrap' };
+const input = { background: C.surfaceHi, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 13, padding: '10px 14px', outline: 'none', width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', transition: 'border-color 0.2s' };
+const focus = (e) => { e.target.style.borderColor = C.accent; };
+const blur = (e) => { e.target.style.borderColor = C.border; };
+const labelStyle = { fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 };
 
 // ── Pill badge ────────────────────────────────────────────────────────────────
 function Pill({ children, color = C.muted }) {
   return <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: `${color}18`, border: `1px solid ${color}40`, color }}>{children}</span>;
 }
 
+// ── Cloudinary Upload Button ──────────────────────────────────────────────────
+function CoverUploadButton({ onUploaded, onError }) {
+  return (
+    <CldUploadWidget
+      signatureEndpoint="/api/sign-cloudinary-params"
+      options={{
+        folder: 'akkharmala/books',
+        resourceType: 'image',
+        maxFileSize: 5000000,
+        clientAllowedSources: ['local', 'url'],
+        clientAllowedFormats: ['jpg', 'jpeg', 'png', 'webp'],
+      }}
+      onSuccess={(result) => {
+        const info = result?.info;
+        if (!info || typeof info === 'string') return;
+        onUploaded(info.secure_url, info.public_id);
+      }}
+      onError={() => onError?.()}
+    >
+      {({ open }) => (
+        <button
+          type="button"
+          onClick={() => open()}
+          style={{ ...ghost, background: C.surfaceHi, flexShrink: 0, fontSize: 12 }}
+          title="Cloudinary-তে ছবি আপলোড করুন"
+        >
+          ☁️ আপলোড
+        </button>
+      )}
+    </CldUploadWidget>
+  );
+}
+
+// ── Image field (URL input + Cloudinary upload + preview) ─────────────────────
+function ImageField({ label, value, onChange, toast, successMsg = 'ছবি আপলোড হয়েছে!' }) {
+  return (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <input
+          type="text"
+          placeholder="ছবির লিঙ্ক (URL) দিন... যেমন: https://..."
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          style={input}
+          onFocus={focus}
+          onBlur={blur}
+        />
+        <CoverUploadButton
+          onUploaded={(url) => { onChange(url); toast(successMsg); }}
+          onError={() => toast('আপলোড ব্যর্থ হয়েছে।', 'error')}
+        />
+      </div>
+
+      {value ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: C.surfaceHi, borderRadius: 12, border: `1px solid ${C.border}` }}>
+          <img
+            src={value}
+            alt="প্রিভিউ"
+            style={{ width: 44, height: 60, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.borderHi}`, flexShrink: 0 }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ কভার ছবি নির্বাচিত</div>
+            <div style={{ fontSize: 10, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', fontSize: 13, padding: '4px 6px' }}
+            title="ছবি বাদ দিন"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: C.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span>💡 ওয়েব লিঙ্ক (URL) দিন অথবা <strong>আপলোড</strong> বাটনে ক্লিক করে ছবি দিন</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function AdminUI() {
-  const router = typeof window !== 'undefined' ? null : null; // client only
-
   // Logout
   const handleLogout = async () => {
     try {
       await fetch('/api/admin/auth', { method: 'DELETE' });
-    } catch {}
+    } catch { }
     window.location.href = '/admin/login';
   };
 
   // Data
-  const [data, setData]         = useState({ series: [], unassigned: [] });
-  const [loading, setLoading]   = useState(true);
+  const [data, setData] = useState({ series: [], unassigned: [] });
+  const [loading, setLoading] = useState(true);
 
   // Global loading operations tracker for delays
   const [activeOps, setActiveOps] = useState([]); // Array of { id, msg }
@@ -108,22 +192,22 @@ export default function AdminUI() {
 
   // Selection / navigation
   const [selSeries, setSelSeries] = useState(null);   // series object
-  const [selBook, setSelBook]     = useState(null);   // book object
-  const [panel, setPanel]         = useState('series'); // 'series'|'books'|'chapters'|'editor'
+  const [selBook, setSelBook] = useState(null);   // book object
+  const [panel, setPanel] = useState('series'); // 'series'|'books'|'chapters'|'editor'
 
   // Editor
-  const [editor, setEditor]     = useState(null);     // { bookTitle, chapterNumber, chapterTitle, content, fileName, isNew }
-  const [saving, setSaving]     = useState(false);
+  const [editor, setEditor] = useState(null);     // { bookTitle, chapterNumber, chapterTitle, content, fileName, isNew }
+  const [saving, setSaving] = useState(false);
 
   // Modals
-  const [modal, setModal]       = useState(null);     // 'new-series'|'new-book'
-  const [confirm, setConfirm]   = useState(null);
+  const [modal, setModal] = useState(null);     // 'new-series'|'edit-series'|'new-book'|'edit-book'
+  const [confirm, setConfirm] = useState(null);
 
   // Forms
-  const [form, setForm]         = useState({});
+  const [form, setForm] = useState({});
 
   // Toast
-  const [toasts, setToasts]     = useState([]);
+  const [toasts, setToasts] = useState([]);
   const textRef = useRef(null);
 
   const toast = useCallback((msg, type = 'success') => {
@@ -173,22 +257,6 @@ export default function AdminUI() {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [panel, editor, saving]);
-
-  // ── Image upload handler ────────────────────────────────────────────────────
-  const handleImageFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      toast('ছবির সাইজ ৪MB-র কম হতে হবে।', 'warn');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setForm((p) => ({ ...p, seriesImage: event.target.result }));
-      toast('ছবি লোড হয়েছে! সংরক্ষণে ক্লিক করুন।');
-    };
-    reader.readAsDataURL(file);
-  };
 
   // ── Series actions ──────────────────────────────────────────────────────────
   const createSeries = async () => {
@@ -510,78 +578,22 @@ export default function AdminUI() {
         <Modal title="নতুন সিরিজ তৈরি করুন" onClose={() => { setModal(null); setForm({}); }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>সিরিজের নাম *</label>
+              <label style={labelStyle}>সিরিজের নাম *</label>
               <input autoFocus type="text" placeholder="যেমন: হ্যারি পটার সিরিজ" value={form.seriesName || ''} onChange={(e) => setForm((p) => ({ ...p, seriesName: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && createSeries()} style={input} onFocus={focus} onBlur={blur} />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>লেখক / রাইটার (ঐচ্ছিক)</label>
+              <label style={labelStyle}>লেখক / রাইটার (ঐচ্ছিক)</label>
               <input type="text" placeholder="যেমন: জে. কে. রাউলিং" value={form.seriesAuthor || ''} onChange={(e) => setForm((p) => ({ ...p, seriesAuthor: e.target.value }))} style={input} onFocus={focus} onBlur={blur} />
             </div>
+            <ImageField
+              label="সিরিজের ছবি / কভার ইমেজ (ঐচ্ছিক)"
+              value={form.seriesImage}
+              onChange={(v) => setForm((p) => ({ ...p, seriesImage: v }))}
+              toast={toast}
+              successMsg="ছবি আপলোড হয়েছে! সংরক্ষণে ক্লিক করুন।"
+            />
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>সিরিজের ছবি / কভার ইমেজ (ঐচ্ছিক)</label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  type="text"
-                  placeholder="ছবির লিঙ্ক (URL) দিন... যেমন: https://..."
-                  value={form.seriesImage || ''}
-                  onChange={(e) => setForm((p) => ({ ...p, seriesImage: e.target.value }))}
-                  style={input}
-                  onFocus={focus}
-                  onBlur={blur}
-                />
-                <label
-                  style={{
-                    ...ghost,
-                    background: C.surfaceHi,
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                    margin: 0,
-                    fontSize: 12,
-                  }}
-                  title="ডিভাইস থেকে ছবি আপলোড করুন"
-                >
-                  📁 আপলোড
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageFileUpload}
-                    style={{ display: 'none' }}
-                  />
-                </label>
-              </div>
-
-              {/* Live preview */}
-              {form.seriesImage ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: C.surfaceHi, borderRadius: 12, border: `1px solid ${C.border}` }}>
-                  <img
-                    src={form.seriesImage}
-                    alt="প্রিভিউ"
-                    style={{ width: 44, height: 60, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.borderHi}`, flexShrink: 0 }}
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ কভার ছবি নির্বাচিত</div>
-                    <div style={{ fontSize: 10, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.seriesImage.startsWith('data:') ? 'ডিভাইস থেকে আপলোড করা ছবি' : form.seriesImage}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setForm((p) => ({ ...p, seriesImage: '' }))}
-                    style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', fontSize: 13, padding: '4px 6px' }}
-                    title="ছবি বাদ দিন"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                <div style={{ fontSize: 11, color: C.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span>💡 ওয়েব লিঙ্ক (URL) দিন অথবা <strong>আপলোড</strong> বাটনে ক্লিক করে ডিভাইস থেকে ছবি দিন</span>
-                </div>
-              )}
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>বিবরণ (ঐচ্ছিক)</label>
+              <label style={labelStyle}>বিবরণ (ঐচ্ছিক)</label>
               <input type="text" placeholder="সিরিজ সম্পর্কে সংক্ষিপ্ত বিবরণ..." value={form.seriesDesc || ''} onChange={(e) => setForm((p) => ({ ...p, seriesDesc: e.target.value }))} style={input} onFocus={focus} onBlur={blur} />
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -599,78 +611,22 @@ export default function AdminUI() {
         <Modal title={`"${form.seriesName}" সিরিজ ও ছবি সম্পাদনা`} onClose={() => { setModal(null); setForm({}); }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>সিরিজের নাম</label>
+              <label style={labelStyle}>সিরিজের নাম</label>
               <input type="text" value={form.seriesName || ''} readOnly style={{ ...input, opacity: 0.7, cursor: 'not-allowed' }} />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>লেখক / রাইটার (ঐচ্ছিক)</label>
+              <label style={labelStyle}>লেখক / রাইটার (ঐচ্ছিক)</label>
               <input type="text" placeholder="যেমন: জে. কে. রাউলিং" value={form.seriesAuthor || ''} onChange={(e) => setForm((p) => ({ ...p, seriesAuthor: e.target.value }))} style={input} onFocus={focus} onBlur={blur} />
             </div>
+            <ImageField
+              label="সিরিজের ছবি / কভার ইমেজ"
+              value={form.seriesImage}
+              onChange={(v) => setForm((p) => ({ ...p, seriesImage: v }))}
+              toast={toast}
+              successMsg="ছবি আপলোড হয়েছে! সংরক্ষণে ক্লিক করুন।"
+            />
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>সিরিজের ছবি / কভার ইমেজ</label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  type="text"
-                  placeholder="ছবির লিঙ্ক (URL) দিন... যেমন: https://..."
-                  value={form.seriesImage || ''}
-                  onChange={(e) => setForm((p) => ({ ...p, seriesImage: e.target.value }))}
-                  style={input}
-                  onFocus={focus}
-                  onBlur={blur}
-                />
-                <label
-                  style={{
-                    ...ghost,
-                    background: C.surfaceHi,
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                    margin: 0,
-                    fontSize: 12,
-                  }}
-                  title="ডিভাইস থেকে ছবি আপলোড করুন"
-                >
-                  📁 আপলোড
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageFileUpload}
-                    style={{ display: 'none' }}
-                  />
-                </label>
-              </div>
-
-              {/* Live preview */}
-              {form.seriesImage ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: C.surfaceHi, borderRadius: 12, border: `1px solid ${C.border}` }}>
-                  <img
-                    src={form.seriesImage}
-                    alt="প্রিভিউ"
-                    style={{ width: 44, height: 60, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.borderHi}`, flexShrink: 0 }}
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ কভার ছবি নির্বাচিত</div>
-                    <div style={{ fontSize: 10, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.seriesImage.startsWith('data:') ? 'ডিভাইস থেকে আপলোড করা ছবি' : form.seriesImage}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setForm((p) => ({ ...p, seriesImage: '' }))}
-                    style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', fontSize: 13, padding: '4px 6px' }}
-                    title="ছবি বাদ দিন"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                <div style={{ fontSize: 11, color: C.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span>💡 ওয়েব লিঙ্ক (URL) দিন অথবা <strong>আপলোড</strong> বাটনে ক্লিক করে ডিভাইস থেকে ছবি দিন</span>
-                </div>
-              )}
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>বিবরণ (ঐচ্ছিক)</label>
+              <label style={labelStyle}>বিবরণ (ঐচ্ছিক)</label>
               <input type="text" placeholder="সিরিজ সম্পর্কে সংক্ষিপ্ত বিবরণ..." value={form.seriesDesc || ''} onChange={(e) => setForm((p) => ({ ...p, seriesDesc: e.target.value }))} style={input} onFocus={focus} onBlur={blur} />
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -684,56 +640,24 @@ export default function AdminUI() {
       )}
 
       {/* ── New Book Modal ─────────────────────────────────────────────────── */}
-      {/* ── New Book Modal ─────────────────────────────────────────────────── */}
       {modal === 'new-book' && selSeries && (
         <Modal title={`"${selSeries.name}"-এ নতুন বই`} onClose={() => { setModal(null); setForm({}); }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <p style={{ fontSize: 12, color: C.muted, margin: 0 }}>সিরিজ: <strong style={{ color: C.accentHi }}>{selSeries.name}</strong></p>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>বইয়ের নাম *</label>
+              <label style={labelStyle}>বইয়ের নাম *</label>
               <input autoFocus type="text" placeholder="যেমন: হ্যারি পটার ও পাথরের পাথর" value={form.bookTitle || ''} onChange={(e) => setForm((p) => ({ ...p, bookTitle: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && createBook()} style={input} onFocus={focus} onBlur={blur} />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>লেখক / রাইটার (ঐচ্ছিক)</label>
-              <input type="text" placeholder={selSeries.author ? `ডিফল্ট: ${selSeries.author}` : "যেমন: জে. কে. রাউলিং"} value={form.bookAuthor || ''} onChange={(e) => setForm((p) => ({ ...p, bookAuthor: e.target.value }))} style={input} onFocus={focus} onBlur={blur} />
+              <label style={labelStyle}>লেখক / রাইটার (ঐচ্ছিক)</label>
+              <input type="text" placeholder={selSeries.author ? `ডিফল্ট: ${selSeries.author}` : 'যেমন: জে. কে. রাউলিং'} value={form.bookAuthor || ''} onChange={(e) => setForm((p) => ({ ...p, bookAuthor: e.target.value }))} style={input} onFocus={focus} onBlur={blur} />
             </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>বইয়ের কভার ছবি (ঐচ্ছিক)</label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  type="text"
-                  placeholder="ছবির লিঙ্ক (URL) দিন... যেমন: https://..."
-                  value={form.bookImage || ''}
-                  onChange={(e) => setForm((p) => ({ ...p, bookImage: e.target.value }))}
-                  style={input}
-                  onFocus={focus}
-                  onBlur={blur}
-                />
-                <label style={{ ...ghost, background: C.surfaceHi, cursor: 'pointer', flexShrink: 0, margin: 0, fontSize: 12 }} title="ডিভাইস থেকে ছবি আপলোড করুন">
-                  📁 আপলোড
-                  <input type="file" accept="image/*" onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    if (file.size > 4 * 1024 * 1024) { toast('ছবির সাইজ ৪MB-র কম হতে হবে।', 'warn'); return; }
-                    const reader = new FileReader();
-                    reader.onload = (ev) => { setForm((p) => ({ ...p, bookImage: ev.target.result })); toast('ছবি লোড হয়েছে!'); };
-                    reader.readAsDataURL(file);
-                  }} style={{ display: 'none' }} />
-                </label>
-              </div>
-              {form.bookImage ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: C.surfaceHi, borderRadius: 12, border: `1px solid ${C.border}` }}>
-                  <img src={form.bookImage} alt="প্রিভিউ" style={{ width: 44, height: 60, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.borderHi}`, flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ কভার ছবি নির্বাচিত</div>
-                    <div style={{ fontSize: 10, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.bookImage.startsWith('data:') ? 'ডিভাইস থেকে আপলোড করা ছবি' : form.bookImage}</div>
-                  </div>
-                  <button type="button" onClick={() => setForm((p) => ({ ...p, bookImage: '' }))} style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', fontSize: 13, padding: '4px 6px' }} title="ছবি বাদ দিন">✕</button>
-                </div>
-              ) : (
-                <div style={{ fontSize: 11, color: C.muted }}><span>💡 ওয়েব লিঙ্ক (URL) দিন অথবা <strong>আপলোড</strong> বাটনে ক্লিক করে ডিভাইস থেকে ছবি দিন</span></div>
-              )}
-            </div>
+            <ImageField
+              label="বইয়ের কভার ছবি (ঐচ্ছিক)"
+              value={form.bookImage}
+              onChange={(v) => setForm((p) => ({ ...p, bookImage: v }))}
+              toast={toast}
+            />
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
               <button onClick={() => { setModal(null); setForm({}); }} disabled={isBusy} style={{ ...ghost, opacity: isBusy ? 0.6 : 1 }}>বাতিল</button>
               <button onClick={createBook} disabled={isBusy || !form.bookTitle?.trim()} style={{ ...primary, opacity: isBusy || !form.bookTitle?.trim() ? 0.5 : 1 }}>
@@ -749,46 +673,15 @@ export default function AdminUI() {
         <Modal title={`"${form.editBookTitle}" — কভার ছবি সম্পাদনা`} onClose={() => { setModal(null); setForm({}); }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>বইয়ের নাম</label>
+              <label style={labelStyle}>বইয়ের নাম</label>
               <input type="text" value={form.editBookTitle || ''} readOnly style={{ ...input, opacity: 0.7, cursor: 'not-allowed' }} />
             </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>বইয়ের কভার ছবি</label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  type="text"
-                  placeholder="ছবির লিঙ্ক (URL) দিন... যেমন: https://..."
-                  value={form.bookImage || ''}
-                  onChange={(e) => setForm((p) => ({ ...p, bookImage: e.target.value }))}
-                  style={input}
-                  onFocus={focus}
-                  onBlur={blur}
-                />
-                <label style={{ ...ghost, background: C.surfaceHi, cursor: 'pointer', flexShrink: 0, margin: 0, fontSize: 12 }} title="ডিভাইস থেকে ছবি আপলোড করুন">
-                  📁 আপলোড
-                  <input type="file" accept="image/*" onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    if (file.size > 4 * 1024 * 1024) { toast('ছবির সাইজ ৪MB-র কম হতে হবে।', 'warn'); return; }
-                    const reader = new FileReader();
-                    reader.onload = (ev) => { setForm((p) => ({ ...p, bookImage: ev.target.result })); toast('ছবি লোড হয়েছে!'); };
-                    reader.readAsDataURL(file);
-                  }} style={{ display: 'none' }} />
-                </label>
-              </div>
-              {form.bookImage ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: C.surfaceHi, borderRadius: 12, border: `1px solid ${C.border}` }}>
-                  <img src={form.bookImage} alt="প্রিভিউ" style={{ width: 44, height: 60, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.borderHi}`, flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ কভার ছবি নির্বাচিত</div>
-                    <div style={{ fontSize: 10, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.bookImage.startsWith('data:') ? 'ডিভাইস থেকে আপলোড করা ছবি' : form.bookImage}</div>
-                  </div>
-                  <button type="button" onClick={() => setForm((p) => ({ ...p, bookImage: '' }))} style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', fontSize: 13, padding: '4px 6px' }} title="ছবি বাদ দিন">✕</button>
-                </div>
-              ) : (
-                <div style={{ fontSize: 11, color: C.muted }}><span>💡 ওয়েব লিঙ্ক (URL) দিন অথবা <strong>আপলোড</strong> বাটনে ক্লিক করে ডিভাইস থেকে ছবি দিন</span></div>
-              )}
-            </div>
+            <ImageField
+              label="বইয়ের কভার ছবি"
+              value={form.bookImage}
+              onChange={(v) => setForm((p) => ({ ...p, bookImage: v }))}
+              toast={toast}
+            />
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
               <button onClick={() => { setModal(null); setForm({}); }} disabled={isBusy} style={{ ...ghost, opacity: isBusy ? 0.6 : 1 }}>বাতিল</button>
               <button onClick={updateBook} disabled={isBusy} style={{ ...primary, opacity: isBusy ? 0.6 : 1 }}>
@@ -1059,7 +952,7 @@ export default function AdminUI() {
                                 fontSize: 16,
                                 flexShrink: 0,
                               }}
-                              title="কোনো ছবি যোগ করা হয়নি"
+                              title="কোনো ছবি যোগ করা হয়নি"
                             >
                               <span>🖼️</span>
                               <span style={{ fontSize: 9, marginTop: 4, color: C.muted }}>ছবি নেই</span>
@@ -1071,7 +964,7 @@ export default function AdminUI() {
                               {s.author ? <p style={{ fontSize: 11, color: C.amber, fontWeight: 700, margin: 0 }}>✍️ {s.author}</p> : null}
                             </div>
                             <p style={{ fontSize: 12, color: C.muted, margin: 0, lineHeight: 1.4, minHeight: 34, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                              {s.description || 'কোনো বিবরণ দেওয়া হয়নি'}
+                              {s.description || 'কোনো বিবরণ দেওয়া হয়নি'}
                             </p>
                           </div>
                         </div>

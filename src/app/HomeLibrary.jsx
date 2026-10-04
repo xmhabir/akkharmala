@@ -143,6 +143,7 @@ function HoverButton({ onClick, baseStyle, hoverStyle, children, title, disabled
 }
 
 // ─── Book Card Component ─────────────────────────────────────────────────────
+// ─── Book Card Component ──────────────────────────────────────────────────
 function BookCard({
   book,
   tag,
@@ -166,13 +167,24 @@ function BookCard({
   const authorDisplay = book?.author && book.author !== 'অজানা' ? book.author : null;
   const seriesDisplay = tag || (book?.series && book.series !== 'সাধারণ সংকলন' ? book.series : null);
 
+  // সম্পূর্ণ স্বচ্ছ কাচ: blur নেই, ব্যাকগ্রাউন্ড প্রায় নেই, শুধু পাতলা ধার
+  const clearGlass = {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.35)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4)',
+  };
+
+  // কভারের ওপর পড়ার জন্য সাদা লেখা + জোরালো shadow
+  const glassText = '#ffffff';
+  const glassTextShadow = '0 1px 3px rgba(0,0,0,0.85), 0 0 8px rgba(0,0,0,0.5)';
+
   return (
     <div
       className="book-card"
       style={{
         position: 'relative',
         zIndex: isExpanded ? 20 : 1,
-        background: book.image ? 'transparent' : T.surface,
+        background: book?.image ? 'transparent' : T.surface,
         border: `1px solid ${T.border}`,
         borderRadius: '20px',
         padding: '20px',
@@ -196,10 +208,10 @@ function BookCard({
         e.currentTarget.style.borderColor = T.border;
       }}
     >
-      {/* Background Image Layer (only when book.image exists) */}
-      {book.image && (
+      {/* BOOK COVER IMAGE */}
+      {book?.image && (
         <div
-          aria-hidden='true'
+          aria-hidden="true"
           style={{
             position: 'absolute',
             inset: 0,
@@ -212,34 +224,41 @@ function BookCard({
           }}
         />
       )}
-      {book.image && (
+
+      {/* MAIN CONTENT WRAPPER */}
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 2,
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+        }}
+      >
+        {/* HEADER (Series & Chapter Count) - CLEAR GLASS BADGES */}
         <div
-          aria-hidden='true'
+          className="book-card-header"
           style={{
-            position: 'absolute',
-            inset: 0,
-            background: T.isDark
-              ? 'linear-gradient(160deg, rgba(10,12,20,0.82) 0%, rgba(10,12,20,0.72) 60%, rgba(10,12,20,0.88) 100%)'
-              : 'linear-gradient(160deg, rgba(255,255,255,0.88) 0%, rgba(255,255,255,0.76) 60%, rgba(255,255,255,0.9) 100%)',
-            zIndex: 1,
-            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '6px',
+            marginBottom: '12px',
+            minHeight: '30px',
           }}
-        />
-      )}
-      {/* z-index wrapper so card content is above bg */}
-      <div style={{ position: 'relative', zIndex: 2, flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
-        <div className="book-card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '12px', minHeight: '30px' }}>
+        >
           {seriesDisplay ? (
             <span
               className="book-card-series-tag"
               style={{
+                ...clearGlass,
                 fontSize: '13px',
                 fontWeight: 700,
-                padding: '3px 8px',
-                borderRadius: '8px',
-                background: T.accentBg,
-                color: T.accentText,
-                border: `1px solid ${T.accentBorder}`,
+                padding: '3px 10px',
+                borderRadius: '999px',
+                color: glassText,
+                textShadow: glassTextShadow,
                 maxWidth: '140px',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -252,16 +271,17 @@ function BookCard({
           ) : (
             <span style={{ display: 'inline-block', height: '1px' }} />
           )}
+
           <span
             className="book-card-chap-count"
             style={{
+              ...clearGlass,
               fontSize: '14px',
               fontWeight: 700,
-              color: T.badgeGreenText,
-              background: T.badgeGreenBg,
-              padding: '4px 10px',
+              color: glassText,
+              textShadow: glassTextShadow,
+              padding: '4px 12px',
               borderRadius: '999px',
-              border: `1px solid ${T.badgeGreenBorder}`,
               marginLeft: 'auto',
               whiteSpace: 'nowrap',
             }}
@@ -270,58 +290,83 @@ function BookCard({
           </span>
         </div>
 
-        <h4
-          className="book-card-title"
+        {/* TITLE + AUTHOR - CLEAR GLASS BOX */}
+        <div
           style={{
-            fontSize: '20px',
-            fontWeight: 800,
-            color: T.text,
-            lineHeight: 1.35,
-            margin: '0 0 6px',
-            minHeight: '54px',
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
+            ...clearGlass,
+            borderRadius: '12px',
+            padding: '5px 10px',
+            marginBottom: '8px',
+            display: 'inline-flex',
+            flexDirection: 'column',
+            alignSelf: 'flex-start',
+            maxWidth: '100%',
+            gap: '1px',
           }}
-          title={titleDisplay}
         >
-          {titleDisplay}
-        </h4>
+          <h4
+            className="book-card-title"
+            title={titleDisplay}
+            style={{
+              fontSize: '17px',
+              fontWeight: 800,
+              color: glassText,
+              lineHeight: 1.1,
+              margin: 0,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              textShadow: glassTextShadow,
+            }}
+          >
+            {titleDisplay}
+          </h4>
 
-        {englishTitle ? (
-          <p style={{ fontSize: '14px', color: T.textSubtle, fontStyle: 'italic', margin: '0 0 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {englishTitle}
-          </p>
-        ) : null}
-
-        <div style={{ minHeight: '26px', marginTop: '2px', display: 'flex', alignItems: 'center' }}>
-          {authorDisplay ? (
+          {englishTitle && (
             <p
-              className="book-card-author"
               style={{
-                fontSize: '15px',
-                color: T.textMuted,
-                fontWeight: 600,
+                fontSize: '12px',
+                color: 'rgba(255,255,255,0.85)',
+                fontStyle: 'italic',
                 margin: 0,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
+                textShadow: glassTextShadow,
               }}
             >
-              <span style={{ color: T.accent }}>✍️</span> {authorDisplay}
+              {englishTitle}
             </p>
-          ) : (
-            <span style={{ fontSize: '14px', color: T.textSubtle, opacity: 0.6 }}>✍️ অজানা লেখক</span>
           )}
+
+          <p
+            className="book-card-author"
+            style={{
+              fontSize: '13px',
+              fontWeight: 700,
+              color: glassText,
+              margin: 0,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              textShadow: glassTextShadow,
+            }}
+          >
+            ✍️ {authorDisplay || 'অজানা লেখক'}
+          </p>
         </div>
 
-        {/* Card Bottom */}
-        <div className="book-card-bottom" style={{ marginTop: 'auto', paddingTop: '10px', borderTop: `1px solid ${T.borderSubtle}` }}>
-          {/* Reading progress badge */}
+        {/* CARD BOTTOM (Progress, Buttons, Chapters) */}
+        <div
+          className="book-card-bottom"
+          style={{
+            marginTop: 'auto',
+            paddingTop: '10px',
+            borderTop: `1px solid ${T.borderSubtle}`,
+          }}
+        >
+          {/* READING PROGRESS */}
           {readingProgress && (
             <div style={{ marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -333,10 +378,20 @@ function BookCard({
                 </span>
               </div>
               <div style={{ height: '4px', background: T.borderSubtle, borderRadius: '999px', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.round(readingProgress.overallPct || 0)}%`, background: T.accent, borderRadius: '999px', transition: 'width 0.4s' }} />
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${Math.round(readingProgress.overallPct || 0)}%`,
+                    background: T.accent,
+                    borderRadius: '999px',
+                    transition: 'width 0.4s',
+                  }}
+                />
               </div>
             </div>
           )}
+
+          {/* READ BUTTON + CHAPTERS */}
           {slug ? (
             <>
               <HoverLink
@@ -361,7 +416,11 @@ function BookCard({
                   gap: '6px',
                   boxSizing: 'border-box',
                 }}
-                hoverStyle={{ background: T.accentHover, color: '#ffffff', boxShadow: `0 4px 14px ${T.accent}55` }}
+                hoverStyle={{
+                  background: T.accentHover,
+                  color: '#ffffff',
+                  boxShadow: `0 4px 14px ${T.accent}55`,
+                }}
               >
                 {isNavigating ? (
                   <LoadingSpinner variant="inline" size="xs" label="লোড হচ্ছে..." />
@@ -372,17 +431,14 @@ function BookCard({
                 )}
               </HoverLink>
 
-              {/* Expandable Chapter List */}
+              {/* CHAPTER LIST */}
               {chapters.length > 0 ? (
                 <div style={{ marginTop: '6px', position: 'relative' }}>
                   <HoverButton
                     className="book-card-chapters-btn"
                     onClick={() => {
-                      if (onOpenChapters) {
-                        onOpenChapters(book);
-                      } else if (toggleExpandChapters) {
-                        toggleExpandChapters(slug);
-                      }
+                      if (onOpenChapters) onOpenChapters(book);
+                      else if (toggleExpandChapters) toggleExpandChapters(slug);
                     }}
                     baseStyle={{
                       width: '100%',
@@ -406,17 +462,10 @@ function BookCard({
                       <span style={{ fontSize: '15px' }}>📑</span>
                       <span>অধ্যায়সমূহ দেখুন ({toBengaliNumber(chapters.length)} টি)</span>
                     </span>
-                    <span
-                      style={{
-                        transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                        transition: 'transform 0.2s',
-                        fontSize: '12px',
-                      }}
-                    >
-                      ▼
-                    </span>
+                    <span style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', fontSize: '12px' }}>▼</span>
                   </HoverButton>
 
+                  {/* EXPANDED CHAPTER LIST */}
                   {isExpanded && (
                     <div
                       style={{
@@ -461,30 +510,10 @@ function BookCard({
                             transform: 'translateX(3px)',
                           }}
                         >
-                          <span
-                            style={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              flex: 1,
-                              fontWeight: 500,
-                            }}
-                          >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 500 }}>
                             {chap.chapterTitle || `অধ্যায় ${toBengaliNumber(chap.chapterNumber)}`}
                           </span>
-                          <span
-                            style={{
-                              flexShrink: 0,
-                              fontSize: '14px',
-                              color: T.accentText,
-                              fontWeight: 700,
-                              background: T.accentBg,
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              marginLeft: '8px',
-                              border: `1px solid ${T.accentBorder}`,
-                            }}
-                          >
+                          <span style={{ flexShrink: 0, fontSize: '14px', color: T.accentText, fontWeight: 700, background: T.accentBg, padding: '3px 8px', borderRadius: '6px', marginLeft: '8px', border: `1px solid ${T.accentBorder}` }}>
                             পড়ুন →
                           </span>
                         </HoverLink>
