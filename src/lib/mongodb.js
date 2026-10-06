@@ -6,7 +6,9 @@ import path from 'path';
 function ensureDns() {
   try {
     dns.setDefaultResultOrder?.('ipv4first');
-    dns.setServers(['8.8.8.8', '1.1.1.1']);
+    if (process.env.NODE_ENV !== 'production') {
+      dns.setServers(['8.8.8.8', '1.1.1.1']);
+    }
   } catch (e) {
     // Ignore if setServers is restricted
   }
@@ -57,6 +59,7 @@ async function connectToDatabase() {
     const opts = {
       bufferCommands: false,
       serverSelectionTimeoutMS: 10000, // 10s timeout to allow cloud cluster handshakes
+      maxPoolSize: 10, // Prevent exhausting connection limits in serverless (Vercel)
     };
 
     cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongooseInstance) => {

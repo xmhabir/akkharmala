@@ -1,12 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Anek+Bangla:wght@300;400;500;600;700;800&family=Noto+Serif+Bengali:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap');
+/* Fonts are loaded via next/font/google in layout.js — no render-blocking @import needed. */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --font-bengali: 'Anek Bangla', 'Noto Serif Bengali', system-ui, -apple-system, sans-serif;
-  --font-serif: 'Noto Serif Bengali', 'Anek Bangla', Georgia, serif;
+  --font-bengali: var(--font-anek-bangla, 'Anek Bangla'), 'Noto Serif Bengali', system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-noto-serif-bengali, 'Noto Serif Bengali'), 'Anek Bangla', Georgia, serif;
   --bg: #faf9f5;
   --header-bg: rgba(250, 249, 245, 0.94);
   --surface: #ffffff;
@@ -101,7 +101,8 @@ html[data-theme='dark'] {
 }
 
 html {
-  scroll-behavior: smooth;
+  /* scroll-behavior: smooth removed — JS scroll calls use explicit 'behavior' param
+     and the reader requires 'instant' restoration; global smooth caused conflicts. */
   background-color: var(--bg);
   color: var(--text);
   font-family: var(--font-bengali);

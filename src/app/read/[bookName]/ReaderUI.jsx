@@ -116,43 +116,76 @@ function RestoreToast({ progress, onRestore, onDismiss, T }) {
   );
 }
 
-export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumber = 1, bookSlug = '' }) {
+/**
+ * ReaderUI — on-demand chapter loading edition.
+ *
+ * Props:
+ *  - chapterMeta:          Array<{ chapterNumber, chapterTitle }> — TOC data only, no content
+ *  - initialContent:       string — content of the starting chapter (server-rendered, zero latency)
+ *  - initialChapterNumber: number — chapter to open first
+ *  - bookTitle:            string
+ *  - bookSlug:             string
+ */
+export default function ReaderUI({
+  bookTitle,
+  chapterMeta = [],
+  initialContent = '',
+  initialChapterNumber = 1,
+  bookSlug = '',
+}) {
   const router = useRouter();
+
   const initialIndex = useMemo(() => {
-    if (!initialChapterNumber || !chapters.length) return 0;
-    const idx = chapters.findIndex((c) => c.chapterNumber === initialChapterNumber);
+    if (!initialChapterNumber || !chapterMeta.length) return 0;
+    const idx = chapterMeta.findIndex((c) => c.chapterNumber === initialChapterNumber);
     return idx !== -1 ? idx : 0;
-  }, [chapters, initialChapterNumber]);
+  }, [chapterMeta, initialChapterNumber]);
 
-  const [chapterIdx, setChapterIdx]         = useState(initialIndex);
-  const [fontIdx, setFontIdx]               = useState(1);
-  const [theme, setThemeState]              = useState('light');
+  const [chapterIdx, setChapterIdx]       = useState(initialIndex);
+  const [fontIdx, setFontIdx]             = useState(1);
+  const [theme, setThemeState]            = useState('light');
 
-  // ── Reading-progress state ────────────────────────────────────────────────
-  // progressPhase: 'idle' | 'toast' | 'restoring' | 'restored'
+  // ── Task 3: On-demand chapter content ─────────────────────────────────────
+  // contentCache maps chapterIndex → content string so we never re-fetch.
+  const contentCacheRef = useRef({ [initialIndex]: initialContent });
+  const [currentContent, setCurrentContent] = useState(initialContent);
+  const [contentLoading, setContentLoading] = useState(false);
+
+  // Prefetch next chapter silently after current one renders
+  const prefetchChapterContent = useCallback(async (idx) => {
+    if (idx < 0 || idx >= chapterMeta.length) return;
+    if (contentCacheRef.current[idx] !== undefined) return; // already cached
+    const meta = chapterMeta[idx];
+    if (!meta) return;
+    try {
+      const res = await fetch(
+        `/api/books/${encodeURIComponent(bookSlug)}/chapters/${meta.chapterNumber}`,
+        { priority: 'low' }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        contentCacheRef.current[idx] = data.content || '';
+      }
+    } catch {
+      // Prefetch failure is silent — user will trigger a fresh fetch on navigation
+    }
+  }, [bookSlug, chapterMeta]);
+
+  // ── Reading-progress state ─────────────────────────────────────────────────
   const [progressPhase, setProgressPhase] = useState('idle');
   const [savedProgress, setSavedProgress] = useState(null);
-  // Guard: don't auto-save until restoration is complete
   const isRestoringRef = useRef(true);
   const saveTimerRef   = useRef(null);
-  // Ref mirrors for reliable access inside cleanup / async callbacks
-  const chapterIdxRef  = useRef(chapterIdx);  // always current chapter index
-  const chaptersRef    = useRef(chapters);     // always current chapters array
-  // Snapshot of scroll position updated live during reading.
-  // Used in cleanup saves so we never read stale DOM after Next.js has navigated away.
+  const chapterIdxRef  = useRef(chapterIdx);
   const scrollStateRef = useRef({ scrollY: 0, scrollPct: 0 });
-  // Pending scroll: set when user arrives at correct chapter via URL, restored silently
-  // Stores { scrollY, scrollPct } — scrollPct is used for restoration (immune to layout shifts)
   const pendingScrollRef = useRef(null);
+
   useEffect(() => { chapterIdxRef.current = chapterIdx; }, [chapterIdx]);
-  useEffect(() => { chaptersRef.current = chapters; }, [chapters]);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem('ebook_theme');
-      if (saved && THEMES[saved]) {
-        setThemeState(saved);
-      }
+      if (saved && THEMES[saved]) setThemeState(saved);
     } catch (e) {}
   }, []);
 
@@ -161,11 +194,8 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
     const slug = bookSlug || (typeof window !== 'undefined' ? decodeURIComponent(window.location.pathname.split('/').pop()) : '');
     if (!slug) { isRestoringRef.current = false; setProgressPhase('restored'); return; }
     const saved = loadReadingProgress(slug);
-    // Only show restore toast if saved progress differs meaningfully from current position
-    // (skip if user already arrived at the correct chapter via ?chapter= URL param)
     const alreadyAtSavedChapter = saved && saved.chapterIdx === initialIndex;
     if (alreadyAtSavedChapter) {
-      // Already on the right chapter — restore scroll silently without toast
       if (saved.scrollY > 10 || saved.scrollPct > 1) {
         pendingScrollRef.current = { scrollY: saved.scrollY, scrollPct: saved.scrollPct || 0 };
       }
@@ -174,7 +204,7 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
     } else if (
       saved &&
       typeof saved.chapterIdx === 'number' &&
-      saved.chapterIdx < chapters.length &&
+      saved.chapterIdx < chapterMeta.length &&
       (saved.chapterIdx > 0 || saved.scrollPct > 5)
     ) {
       setSavedProgress(saved);
@@ -186,18 +216,58 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Prefetch adjacent chapters once content is ready ─────────────────────
+  useEffect(() => {
+    if (progressPhase !== 'restored') return;
+    // Prefetch next chapter in background — common reading direction
+    const timer = setTimeout(() => {
+      prefetchChapterContent(chapterIdx + 1);
+    }, 1500); // Wait 1.5s so it doesn't compete with current chapter render
+    return () => clearTimeout(timer);
+  }, [chapterIdx, progressPhase, prefetchChapterContent]);
+
+  // ── Fetch chapter content on demand ──────────────────────────────────────
+  const loadChapterContent = useCallback(async (idx) => {
+    // Check cache first
+    if (contentCacheRef.current[idx] !== undefined) {
+      setCurrentContent(contentCacheRef.current[idx]);
+      return;
+    }
+    const meta = chapterMeta[idx];
+    if (!meta) return;
+    setContentLoading(true);
+    try {
+      const res = await fetch(
+        `/api/books/${encodeURIComponent(bookSlug)}/chapters/${meta.chapterNumber}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.content || '';
+        contentCacheRef.current[idx] = content;
+        setCurrentContent(content);
+      } else {
+        setCurrentContent('');
+      }
+    } catch {
+      setCurrentContent('');
+    } finally {
+      setContentLoading(false);
+    }
+  }, [bookSlug, chapterMeta]);
+
   // ── Restore: user clicked "Continue reading" ──────────────────────────────
   const handleRestoreProgress = useCallback(() => {
     if (!savedProgress) return;
     setProgressPhase('restoring');
     setChanging(true);
-    setTimeout(() => {
-      setChapterIdx(savedProgress.chapterIdx);
+    setTimeout(async () => {
+      const targetIdx = savedProgress.chapterIdx;
+      await loadChapterContent(targetIdx);
+      setChapterIdx(targetIdx);
       setChanging(false);
       setTimeout(() => {
         isRestoringRef.current = false;
         setProgressPhase('restored');
-        // Restore scroll using percentage for precision (immune to layout shifts)
         const doScroll = () => {
           const totalScrollable = document.documentElement.scrollHeight - window.innerHeight;
           if (totalScrollable < 10) { requestAnimationFrame(doScroll); return; }
@@ -218,7 +288,7 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
         requestAnimationFrame(doScroll);
       }, 350);
     }, 200);
-  }, [savedProgress]);
+  }, [savedProgress, loadChapterContent]);
 
   // ── Dismiss toast: start from beginning ──────────────────────────────────
   const handleDismissToast = useCallback(() => {
@@ -234,60 +304,55 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
     saveTimerRef.current = setTimeout(() => {
       const slug = bookSlug || (typeof window !== 'undefined' ? decodeURIComponent(window.location.pathname.split('/').pop()) : '');
       if (!slug) return;
-      const cidx = overrideChapterIdx !== undefined ? overrideChapterIdx : chapterIdx;
-      const ch   = chapters[cidx] || {};
+      const cidx = overrideChapterIdx !== undefined ? overrideChapterIdx : chapterIdxRef.current;
+      const ch   = chapterMeta[cidx] || {};
       const scrollY   = window.scrollY;
       const total     = document.documentElement.scrollHeight - window.innerHeight;
       const scrollPct = total > 0 ? Math.min(100, (scrollY / total) * 100) : 0;
-      saveReadingProgress({ bookSlug: slug, bookTitle, chapterIdx: cidx,
-        chapterNumber: ch.chapterNumber || (cidx + 1), chapterTitle: ch.chapterTitle || '',
-        totalChapters: chapters.length, scrollY, scrollPct });
+      saveReadingProgress({
+        bookSlug: slug, bookTitle,
+        chapterIdx: cidx,
+        chapterNumber: ch.chapterNumber || (cidx + 1),
+        chapterTitle: ch.chapterTitle || '',
+        totalChapters: chapterMeta.length,
+        scrollY, scrollPct,
+      });
     }, 800);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookSlug, bookTitle, chapters]);
+  }, [bookSlug, bookTitle, chapterMeta]);
 
   const setTheme = (newTheme) => {
     setThemeState(newTheme);
-    try {
-      localStorage.setItem('ebook_theme', newTheme);
-    } catch (e) {}
+    try { localStorage.setItem('ebook_theme', newTheme); } catch (e) {}
   };
 
-  const [tocOpen, setTocOpen]               = useState(false);
-  const [progress, setProgress]             = useState(0);
-  const [headerVisible, setHeaderVisible]   = useState(true);
-  const [changing, setChanging]             = useState(false);
+  const [tocOpen, setTocOpen]             = useState(false);
+  const [progress, setProgress]           = useState(0);
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const [changing, setChanging]           = useState(false);
 
   const lastScrollY = useRef(0);
   const T = THEMES[theme];
   const F = FONT_SIZES[fontIdx];
-  const chapter = chapters[chapterIdx] || { chapterNumber: 1, chapterTitle: 'অধ্যায়', content: '' };
+  const chapter = chapterMeta[chapterIdx] || { chapterNumber: 1, chapterTitle: 'অধ্যায়' };
 
   const paragraphs = useMemo(() => {
-    if (!chapter.content) return [];
-    return chapter.content.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean);
-  }, [chapter.content]);
+    if (!currentContent) return [];
+    return currentContent.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean);
+  }, [currentContent]);
 
+  // When chapterIdx changes: load content, reset scroll, save progress
   useEffect(() => {
     const pending = pendingScrollRef.current;
     if (pending) {
       pendingScrollRef.current = null;
-      // Use requestAnimationFrame to ensure DOM has painted, then scroll.
-      // We use scrollPct (percentage) to restore position, which is immune to
-      // minor layout shifts from font loading or different viewport heights.
-      // 'instant' avoids a smooth animation that could be visually imprecise.
       const restoreScroll = () => {
         const totalScrollable = document.documentElement.scrollHeight - window.innerHeight;
-        if (totalScrollable < 10) {
-          // Content not yet tall enough — retry after a frame
-          requestAnimationFrame(restoreScroll);
-          return;
-        }
+        if (totalScrollable < 10) { requestAnimationFrame(restoreScroll); return; }
         const targetY = pending.scrollPct > 0
           ? Math.round((pending.scrollPct / 100) * totalScrollable)
           : pending.scrollY;
         window.scrollTo({ top: targetY, behavior: 'instant' });
-        // One final retry after 200ms to correct any late layout shifts
         setTimeout(() => {
           const total = document.documentElement.scrollHeight - window.innerHeight;
           const retryY = pending.scrollPct > 0
@@ -305,7 +370,6 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
     setProgress(0);
   }, [chapterIdx]);
 
-  // Save when chapter changes (after guard is lifted)
   useEffect(() => {
     if (progressPhase === 'restored') scheduleSave(chapterIdx);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -321,32 +385,33 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
         else if (y < lastScrollY.current - 10) setHeaderVisible(true);
       } else setHeaderVisible(true);
       lastScrollY.current = y;
-      // Keep scrollStateRef in sync — this is the authoritative snapshot used by
-      // save-on-unmount, avoiding the race where Next.js replaces the DOM before cleanup.
       const pct = total > 0 ? Math.min(100, (y / total) * 100) : 0;
       scrollStateRef.current = { scrollY: y, scrollPct: pct };
-      scheduleSave(); // debounced auto-save on scroll
+      scheduleSave();
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, [scheduleSave]);
 
-  // ── Save before HARD page unload (refresh / close tab) ───────────────────
   useEffect(() => {
     const onUnload = () => {
       if (isRestoringRef.current) return;
       const slug = bookSlug || decodeURIComponent(window.location.pathname.split('/').pop());
       if (!slug) return;
       const cidx = chapterIdxRef.current;
-      const ch = chaptersRef.current[cidx] || {};
-      // Use live DOM values here — beforeunload fires before any navigation
+      const ch = chapterMeta[cidx] || {};
       const scrollY   = window.scrollY;
       const total     = document.documentElement.scrollHeight - window.innerHeight;
       const scrollPct = total > 0 ? Math.min(100, (scrollY / total) * 100) : 0;
-      scrollStateRef.current = { scrollY, scrollPct }; // keep ref in sync too
-      saveReadingProgress({ bookSlug: slug, bookTitle, chapterIdx: cidx,
-        chapterNumber: ch.chapterNumber || (cidx + 1), chapterTitle: ch.chapterTitle || '',
-        totalChapters: chaptersRef.current.length, scrollY, scrollPct });
+      scrollStateRef.current = { scrollY, scrollPct };
+      saveReadingProgress({
+        bookSlug: slug, bookTitle,
+        chapterIdx: cidx,
+        chapterNumber: ch.chapterNumber || (cidx + 1),
+        chapterTitle: ch.chapterTitle || '',
+        totalChapters: chapterMeta.length,
+        scrollY, scrollPct,
+      });
     };
     window.addEventListener('beforeunload', onUnload);
     return () => {
@@ -356,11 +421,6 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookSlug, bookTitle]);
 
-  // ── Save on component UNMOUNT (Next.js client-side navigation) ───────────
-  // router.back() / Link clicks do NOT fire beforeunload — this catches those.
-  // IMPORTANT: We read from scrollStateRef, NOT live DOM (window.scrollY /
-  // scrollHeight). By the time cleanup fires, Next.js may have already swapped
-  // in the home page, making those values meaningless or 100%.
   useEffect(() => {
     return () => {
       if (isRestoringRef.current) return;
@@ -368,47 +428,57 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
         const slug = bookSlug || decodeURIComponent(window.location.pathname.split('/').pop());
         if (!slug) return;
         const cidx = chapterIdxRef.current;
-        const ch = chaptersRef.current[cidx] || {};
-        const { scrollY, scrollPct } = scrollStateRef.current; // ← snapshot from last scroll event
-        saveReadingProgress({ bookSlug: slug, bookTitle, chapterIdx: cidx,
-          chapterNumber: ch.chapterNumber || (cidx + 1), chapterTitle: ch.chapterTitle || '',
-          totalChapters: chaptersRef.current.length, scrollY, scrollPct });
+        const ch = chapterMeta[cidx] || {};
+        const { scrollY, scrollPct } = scrollStateRef.current;
+        saveReadingProgress({
+          bookSlug: slug, bookTitle,
+          chapterIdx: cidx,
+          chapterNumber: ch.chapterNumber || (cidx + 1),
+          chapterTitle: ch.chapterTitle || '',
+          totalChapters: chapterMeta.length,
+          scrollY, scrollPct,
+        });
       } catch (e) {}
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookSlug, bookTitle]);  // stable deps — refs handle latest values
+  }, [bookSlug, bookTitle]);
 
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'ArrowRight' || e.key === 'PageDown') { if (chapterIdx < chapters.length - 1) switchChapter(chapterIdx + 1); }
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') { if (chapterIdx < chapterMeta.length - 1) switchChapter(chapterIdx + 1); }
       else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { if (chapterIdx > 0) switchChapter(chapterIdx - 1); }
       else if (e.key === 'Escape') setTocOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chapterIdx, chapters.length]);
+  }, [chapterIdx, chapterMeta.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Sync URL with current chapter (no history stack entry) ───────────────
+  // ── Task 8: Sync URL — use history.replaceState, NOT router.replace() ──────
+  // router.replace() triggers a server request; history.replaceState is client-only.
   useEffect(() => {
-    if (progressPhase !== 'restored') return; // don't change URL during restore animation
-    const ch = chapters[chapterIdx];
+    if (progressPhase !== 'restored') return;
+    const ch = chapterMeta[chapterIdx];
     if (!ch) return;
     const chapterNum = ch.chapterNumber || (chapterIdx + 1);
     const url = new URL(window.location.href);
     const current = url.searchParams.get('chapter');
     if (String(current) !== String(chapterNum)) {
       url.searchParams.set('chapter', chapterNum);
-      router.replace(url.pathname + url.search, { scroll: false });
+      // Task 8: history.replaceState — zero network overhead vs router.replace()
+      window.history.replaceState(null, '', url.pathname + url.search);
     }
-  }, [chapterIdx, progressPhase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chapterIdx, progressPhase, chapterMeta]);
 
-  const switchChapter = useCallback((idx) => {
+  const switchChapter = useCallback(async (idx) => {
     if (idx === chapterIdx) return;
     setChanging(true);
     setTocOpen(false);
-    setTimeout(() => { setChapterIdx(idx); setChanging(false); }, 200);
-  }, [chapterIdx]);
+    // Load content for new chapter (from cache or fetch)
+    await loadChapterContent(idx);
+    setChapterIdx(idx);
+    setChanging(false);
+  }, [chapterIdx, loadChapterContent]);
 
   const btn = (extra = {}) => ({
     background: 'transparent',
@@ -463,7 +533,7 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
             </svg>
           </button>
 
-          {/* TOC trigger — three horizontal lines */}
+          {/* TOC trigger */}
           <button
             onClick={() => setTocOpen(true)}
             style={btn()}
@@ -479,8 +549,8 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
           <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
             <div style={{ fontSize: '17px', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.2 }}>{bookTitle}</div>
             <div style={{ fontSize: '13px', color: T.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>অধ্যায় {toBengaliNumber(chapterIdx + 1)} / {toBengaliNumber(chapters.length)}</span>
-              <span style={{ color: T.bar, fontWeight: 700 }}>· {Math.round(chapters.length > 0 ? ((chapterIdx / chapters.length) * 100) + ((progress / 100) * (100 / chapters.length)) : 0)}%</span>
+              <span>অধ্যায় {toBengaliNumber(chapterIdx + 1)} / {toBengaliNumber(chapterMeta.length)}</span>
+              <span style={{ color: T.bar, fontWeight: 700 }}>· {Math.round(chapterMeta.length > 0 ? ((chapterIdx / chapterMeta.length) * 100) + ((progress / 100) * (100 / chapterMeta.length)) : 0)}%</span>
             </div>
           </div>
 
@@ -544,7 +614,7 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
         </header>
 
         {/* Body */}
-        {changing ? (
+        {(changing || contentLoading) ? (
           <div style={{ padding: '80px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <LoadingSpinner variant="magical" size="lg" label="অধ্যায় খোলা হচ্ছে..." />
           </div>
@@ -577,10 +647,10 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
           pointerEvents: 'auto',
         }}>
           <button
-            onClick={() => { if (chapterIdx > 0) switchChapter(chapterIdx - 1); }}
-            disabled={chapterIdx === 0}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: 600, border: 'none', background: 'transparent', color: T.text, cursor: chapterIdx === 0 ? 'not-allowed' : 'pointer', opacity: chapterIdx === 0 ? 0.3 : 1, transition: 'all 0.15s' }}
-            onMouseEnter={(e) => { if (chapterIdx > 0) e.currentTarget.style.background = T.btnBg; }}
+            onClick={() => { if (chapterIdx > 0 && !changing && !contentLoading) switchChapter(chapterIdx - 1); }}
+            disabled={chapterIdx === 0 || changing || contentLoading}
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: 600, border: 'none', background: 'transparent', color: T.text, cursor: (chapterIdx === 0 || changing || contentLoading) ? 'not-allowed' : 'pointer', opacity: (chapterIdx === 0 || changing || contentLoading) ? 0.3 : 1, transition: 'all 0.15s' }}
+            onMouseEnter={(e) => { if (chapterIdx > 0 && !changing && !contentLoading) e.currentTarget.style.background = T.btnBg; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
@@ -594,14 +664,14 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <span style={{ fontSize: '13px', fontWeight: 700 }}>অধ্যায় {toBengaliNumber(chapterIdx + 1)}</span>
-            <span style={{ fontSize: '10px', color: T.muted }}>মোট {toBengaliNumber(chapters.length)} টি</span>
+            <span style={{ fontSize: '10px', color: T.muted }}>মোট {toBengaliNumber(chapterMeta.length)} টি</span>
           </button>
 
           <button
-            onClick={() => { if (chapterIdx < chapters.length - 1) switchChapter(chapterIdx + 1); }}
-            disabled={chapterIdx === chapters.length - 1}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: 600, border: 'none', background: 'transparent', color: T.text, cursor: chapterIdx === chapters.length - 1 ? 'not-allowed' : 'pointer', opacity: chapterIdx === chapters.length - 1 ? 0.3 : 1, transition: 'all 0.15s' }}
-            onMouseEnter={(e) => { if (chapterIdx < chapters.length - 1) e.currentTarget.style.background = T.btnBg; }}
+            onClick={() => { if (chapterIdx < chapterMeta.length - 1 && !changing && !contentLoading) switchChapter(chapterIdx + 1); }}
+            disabled={chapterIdx === chapterMeta.length - 1 || changing || contentLoading}
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: 600, border: 'none', background: 'transparent', color: T.text, cursor: (chapterIdx === chapterMeta.length - 1 || changing || contentLoading) ? 'not-allowed' : 'pointer', opacity: (chapterIdx === chapterMeta.length - 1 || changing || contentLoading) ? 0.3 : 1, transition: 'all 0.15s' }}
+            onMouseEnter={(e) => { if (chapterIdx < chapterMeta.length - 1 && !changing && !contentLoading) e.currentTarget.style.background = T.btnBg; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             পরবর্তী
@@ -625,11 +695,10 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
             display: 'flex', flexDirection: 'column',
             boxShadow: '4px 0 32px rgba(0,0,0,0.22)',
           }}>
-            {/* Drawer header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: `1px solid ${T.tocBorder}` }}>
               <div>
                 <h3 style={{ margin: 0, fontWeight: 800, fontSize: '17px' }}>সূচিপত্র</h3>
-                <p style={{ margin: '3px 0 0', fontSize: '12px', color: T.muted }}>মোট {toBengaliNumber(chapters.length)} টি অধ্যায়</p>
+                <p style={{ margin: '3px 0 0', fontSize: '12px', color: T.muted }}>মোট {toBengaliNumber(chapterMeta.length)} টি অধ্যায়</p>
               </div>
               <button
                 onClick={() => setTocOpen(false)}
@@ -640,9 +709,8 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
               </button>
             </div>
 
-            {/* Chapter list */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '10px 10px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {chapters.map((ch, idx) => {
+              {chapterMeta.map((ch, idx) => {
                 const active = idx === chapterIdx;
                 return (
                   <button
@@ -667,7 +735,6 @@ export default function ReaderUI({ bookTitle, chapters = [], initialChapterNumbe
               })}
             </div>
 
-            {/* Footer */}
             <div style={{ padding: '12px 18px', borderTop: `1px solid ${T.tocBorder}`, textAlign: 'center' }}>
               <span style={{ fontSize: '11px', color: T.muted }}>কীবোর্ড: ← পূর্ববর্তী | পরবর্তী →</span>
             </div>

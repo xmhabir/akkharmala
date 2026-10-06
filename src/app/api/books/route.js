@@ -5,19 +5,10 @@ import connectToDatabase from '../../../lib/mongodb';
 import Series from '../../../models/Series';
 import Book from '../../../models/Book';
 import Chapter from '../../../models/Chapter';
+import { bengaliToEnglishDigits, extractChapterNumber } from '../../../lib/bengaliUtils';
 
-export const dynamic = 'force-dynamic';
-
-function bengaliToEnglishDigits(str) {
-  const bengaliNumerals = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
-  return str.replace(/[০-৯]/g, (match) => bengaliNumerals.indexOf(match));
-}
-
-function extractChapterNumber(filename) {
-  const normalized = bengaliToEnglishDigits(filename);
-  const match = normalized.match(/^\s*(\d+)/);
-  return match ? parseInt(match[1], 10) : 0;
-}
+// ISR: Public book list cached for 60s. Invalidated on next.js revalidate or admin action.
+export const revalidate = 60;
 
 export async function GET() {
   let isDbConnected = false;

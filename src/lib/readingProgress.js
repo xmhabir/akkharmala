@@ -15,6 +15,7 @@ function updateIndex(bookSlug) {
   try {
     const raw = localStorage.getItem(ALL_SLUGS_KEY);
     let slugs = raw ? JSON.parse(raw) : [];
+    if (slugs[0] === bookSlug) return; // Already the latest book, avoid redundant localStorage writes
     slugs = slugs.filter((s) => s !== bookSlug);
     slugs.unshift(bookSlug);
     if (slugs.length > 50) slugs = slugs.slice(0, 50);

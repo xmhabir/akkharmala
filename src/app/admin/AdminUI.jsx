@@ -2,7 +2,13 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { CldUploadWidget } from 'next-cloudinary';
+import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+
+const CldUploadWidget = dynamic(
+  () => import('next-cloudinary').then((mod) => mod.CldUploadWidget),
+  { ssr: false }
+);
 
 const C = {
   bg: '#0d0f18', surface: '#161925', surfaceHi: '#1e2235',
@@ -160,12 +166,14 @@ function ImageField({ label, value, onChange, toast, successMsg = 'ছবি আ
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function AdminUI() {
+  const router = useRouter();
+
   // Logout
   const handleLogout = async () => {
     try {
       await fetch('/api/admin/auth', { method: 'DELETE' });
     } catch { }
-    window.location.href = '/admin/login';
+    router.push('/admin/login');
   };
 
   // Data

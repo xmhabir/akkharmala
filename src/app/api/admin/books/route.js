@@ -72,7 +72,7 @@ export async function GET() {
     const diskMeta = readDiskMeta(); // { "SeriesName": { description, books: [...] } }
 
     // If DB is connected and diskMeta has entries (local dev only), sync disk meta to DB
-    if (isDbConnected && Object.keys(diskMeta).length > 0) {
+    if (process.env.NODE_ENV !== 'production' && isDbConnected && Object.keys(diskMeta).length > 0) {
       try {
         for (const [seriesName, info] of Object.entries(diskMeta)) {
           await Series.findOneAndUpdate(

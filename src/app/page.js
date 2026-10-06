@@ -5,19 +5,12 @@ import Series from '../models/Series';
 import Book from '../models/Book';
 import Chapter from '../models/Chapter';
 import HomeLibrary from './HomeLibrary';
+import { bengaliToEnglishDigits, extractChapterNumber } from '../lib/bengaliUtils';
 
-export const dynamic = 'force-dynamic';
-
-function bengaliToEnglishDigits(str) {
-  const bengaliNumerals = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
-  return str.replace(/[০-৯]/g, (match) => bengaliNumerals.indexOf(match));
-}
-
-function extractChapterNumber(filename) {
-  const normalized = bengaliToEnglishDigits(filename);
-  const match = normalized.match(/^\s*(\d+)/);
-  return match ? parseInt(match[1], 10) : 0;
-}
+// ISR: Statically cached, regenerated every 60 seconds.
+// The book library rarely changes (only when admin adds/edits content).
+// This eliminates a cold MongoDB query on every visitor's page load.
+export const revalidate = 60;
 
 export default async function HomePage() {
   let books = [];

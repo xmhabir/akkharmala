@@ -5,6 +5,7 @@ import Link from 'next/link';
 import LoadingSpinner from './components/LoadingSpinner';
 import { loadAllReadingProgress, formatRelativeTime } from '../lib/readingProgress';
 import Image from 'next/image';
+import { getCloudinaryUrl } from '../lib/bengaliUtils';
 
 // Helper to convert English numbers to Bengali numerals
 const toBengaliNumber = (num) => {
@@ -215,7 +216,7 @@ function BookCard({
           style={{
             position: 'absolute',
             inset: 0,
-            backgroundImage: `url("${book.image}")`,
+            backgroundImage: `url("${getCloudinaryUrl(book.image, 340, 2)}")`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
@@ -1070,8 +1071,9 @@ export default function HomeLibrary({
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Client-side fetch to ensure books, series, and authors are always synced from DB
+  // Client-side fetch fallback: Only fetch if server-rendered books list is empty
   useEffect(() => {
+    if (diskBooks && diskBooks.length > 0) return;
     fetch('/api/books')
       .then((res) => res.json())
       .then((json) => {
@@ -1082,7 +1084,7 @@ export default function HomeLibrary({
         }
       })
       .catch((err) => console.warn('Could not fetch /api/books:', err));
-  }, []);
+  }, [diskBooks]);
 
   const toggleExpandChapters = useCallback((slug) => {
     setExpandedBookSlug((prev) => (prev === slug ? null : slug));
@@ -1291,6 +1293,7 @@ export default function HomeLibrary({
                 width={42}
                 height={42}
                 className="rounded-xl"
+                priority
               />
               <div>
                 <span className="app-header-brand-title" style={{ fontSize: '22px', fontWeight: 800, color: T.text, display: 'block', lineHeight: 1.1 }}>
@@ -1633,7 +1636,7 @@ export default function HomeLibrary({
                           style={{
                             position: 'absolute',
                             inset: 0,
-                            backgroundImage: `url("${series.image}")`,
+                            backgroundImage: `url("${getCloudinaryUrl(series.image, 400, 2)}")`,
                             backgroundSize: 'cover',
                             backgroundPosition: 'center top',
                             backgroundRepeat: 'no-repeat',
@@ -1879,7 +1882,7 @@ export default function HomeLibrary({
               style={{
                 position: 'relative',
                 backgroundImage: activeSeries.image
-                  ? `linear-gradient(90deg, rgba(28,25,23,0.95) 0%, rgba(28,25,23,0.8) 45%, rgba(28,25,23,0.55) 100%), url("${activeSeries.image}")`
+                  ? `linear-gradient(90deg, rgba(28,25,23,0.95) 0%, rgba(28,25,23,0.8) 45%, rgba(28,25,23,0.55) 100%), url("${getCloudinaryUrl(activeSeries.image, 1200, 1)}")`
                   : 'linear-gradient(135deg, #1c1917, #292524)',
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',

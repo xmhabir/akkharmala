@@ -4,21 +4,11 @@ import { NextResponse } from 'next/server';
 import connectToDatabase from '../../../../lib/mongodb';
 import Book from '../../../../models/Book';
 import Chapter from '../../../../models/Chapter';
+import { bengaliToEnglishDigits, extractChapterNumber } from '../../../../lib/bengaliUtils';
 
 export const dynamic = 'force-dynamic';
 
 const BOOKS_DIR = () => path.join(process.cwd(), 'books');
-
-function bengaliToEnglishDigits(str) {
-  const bengaliNumerals = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
-  return str.replace(/[০-৯]/g, (match) => bengaliNumerals.indexOf(match));
-}
-
-function extractChapterNumber(filename) {
-  const normalized = bengaliToEnglishDigits(filename);
-  const match = normalized.match(/^\s*(\d+)/);
-  return match ? parseInt(match[1], 10) : 0;
-}
 
 // ── GET /api/admin/chapters?book=BOOK_TITLE&chapter=FILENAME ──────────────────
 export async function GET(req) {
@@ -177,12 +167,9 @@ export async function POST(req) {
           { upsert: true, new: true }
         );
 
-        // Update Book's chaptersCount
-        const count = await Chapter.countDocuments({
-          $or: [{ bookId: book._id }, { bookSlug: book.slug }, { bookSlug: slug }],
-        });
-        book.chaptersCount = count;
-        await book.save();
+        // Update Book's chaptersCount with indexed count and atomic update
+        const count = await Chapter.countDocuments({ bookId: book._id });
+        await Book.updateOne({ _id: book._id }, { $set: { chaptersCount: count } });
       } catch (dbErr) {
         console.error('Failed saving chapter to DB:', dbErr);
       }
@@ -259,11 +246,9 @@ export async function DELETE(req) {
 
           await Chapter.deleteOne(filter);
 
-          const count = await Chapter.countDocuments({
-            $or: [{ bookId: book._id }, { bookSlug: book.slug }, { bookSlug: slug }],
-          });
-          book.chaptersCount = count;
-          await book.save();
+          // Update Book's chaptersCount with indexed count and atomic update
+          const count = await Chapter.countDocuments({ bookId: book._id });
+          await Book.updateOne({ _id: book._id }, { $set: { chaptersCount: count } });
         }
       } catch (dbErr) {
         console.warn('DB delete chapter error:', dbErr.message);

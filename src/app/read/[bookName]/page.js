@@ -5,19 +5,11 @@ import connectToDatabase from '../../../lib/mongodb';
 import Book from '../../../models/Book';
 import Chapter from '../../../models/Chapter';
 import ReaderUI from './ReaderUI';
+import { extractChapterNumber } from '../../../lib/bengaliUtils';
 
+// Reader page is always dynamic: personalised URL params (?chapter=N).
+// We keep force-dynamic here because every user's starting chapter differs.
 export const dynamic = 'force-dynamic';
-
-function bengaliToEnglishDigits(str) {
-  const bengaliNumerals = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
-  return str.replace(/[০-৯]/g, (match) => bengaliNumerals.indexOf(match));
-}
-
-function extractChapterNumber(filename) {
-  const normalized = bengaliToEnglishDigits(filename);
-  const match = normalized.match(/^\s*(\d+)/);
-  return match ? parseInt(match[1], 10) : 0;
-}
 
 export default async function ReadPage({ params, searchParams }) {
   const resolvedParams = await params;
@@ -25,15 +17,18 @@ export default async function ReadPage({ params, searchParams }) {
   const rawBookName = resolvedParams?.bookName;
   const targetChapter = resolvedSearchParams?.chapter ? parseInt(resolvedSearchParams.chapter, 10) : 1;
 
-  if (!rawBookName) {
-    notFound();
-  }
+  if (!rawBookName) notFound();
 
   const bookName = decodeURIComponent(rawBookName);
-  let chapters = [];
-  let displayTitle = bookName;
 
-  // 1. Try querying from MongoDB Backend
+  // chapterMeta: lightweight array { chapterNumber, chapterTitle } — NO content
+  // initialContent: content string for the FIRST chapter the user sees
+  let chapterMeta = [];
+  let initialContent = '';
+  let displayTitle = bookName;
+  let bookSlug = rawBookName;
+
+  // ── 1. MongoDB (primary source) ──────────────────────────────────────────
   try {
     await connectToDatabase();
     const book = await Book.findOne({
@@ -48,7 +43,9 @@ export default async function ReadPage({ params, searchParams }) {
 
     if (book) {
       displayTitle = book.title;
-      const dbChapters = await Chapter.find({
+      bookSlug = book.slug || rawBookName;
+
+      const bookQuery = {
         $or: [
           { bookId: book._id },
           { bookSlug: book.slug },
@@ -56,24 +53,41 @@ export default async function ReadPage({ params, searchParams }) {
           { bookSlug: bookName },
           { bookSlug: encodeURIComponent(bookName) },
         ],
-      })
+      };
+
+      // Task 9: Fetch METADATA only — no content field. Dramatically reduces payload.
+      const meta = await Chapter.find(bookQuery)
         .sort({ chapterNumber: 1 })
+        .select('chapterNumber chapterTitle -_id')
         .lean();
 
-      if (dbChapters && dbChapters.length > 0) {
-        chapters = dbChapters.map((c) => ({
+      if (meta && meta.length > 0) {
+        chapterMeta = meta.map((c) => ({
           chapterNumber: c.chapterNumber,
           chapterTitle: c.chapterTitle,
-          content: c.content,
         }));
+
+        // Task 3: Only fetch the ONE chapter the user wants to read right now
+        const startNum = chapterMeta.find((c) => c.chapterNumber === targetChapter)
+          ? targetChapter
+          : chapterMeta[0].chapterNumber;
+
+        const startChapter = await Chapter.findOne({
+          ...bookQuery,
+          chapterNumber: startNum,
+        })
+          .select('content -_id')
+          .lean();
+
+        initialContent = startChapter?.content || '';
       }
     }
   } catch (dbError) {
     console.warn('MongoDB query failed, falling back to local files:', dbError.message);
   }
 
-  // 2. Resilient Fallback: If not found in DB or DB offline, read from /books directory
-  if (chapters.length === 0) {
+  // ── 2. Filesystem fallback ────────────────────────────────────────────────
+  if (chapterMeta.length === 0) {
     const booksDir = path.join(process.cwd(), 'books');
     let bookDirectory = path.join(booksDir, bookName);
 
@@ -106,34 +120,36 @@ export default async function ReadPage({ params, searchParams }) {
           return a.localeCompare(b, 'bn', { numeric: true });
         });
 
-        chapters = txtFiles.map((file, index) => {
-          const filePath = path.join(bookDirectory, file);
-          const rawContent = fs.readFileSync(filePath, 'utf-8');
+        chapterMeta = txtFiles.map((file, index) => {
           const extractedNum = extractChapterNumber(file);
-          const chapterNumber = extractedNum > 0 ? extractedNum : index + 1;
-          const chapterTitle = path.parse(file).name;
-
           return {
-            chapterNumber,
-            chapterTitle,
-            content: rawContent,
+            chapterNumber: extractedNum > 0 ? extractedNum : index + 1,
+            chapterTitle: path.parse(file).name,
           };
         });
+
+        // Task 3: Read only the starting chapter for filesystem books too
+        const startMeta = chapterMeta.find((c) => c.chapterNumber === targetChapter) || chapterMeta[0];
+        const startFile = txtFiles.find((file, index) => {
+          const n = extractChapterNumber(file) || index + 1;
+          return n === startMeta.chapterNumber;
+        });
+        if (startFile) {
+          initialContent = fs.readFileSync(path.join(bookDirectory, startFile), 'utf-8');
+        }
       }
     }
   }
 
-  if (chapters.length === 0) {
-    notFound();
-  }
+  if (chapterMeta.length === 0) notFound();
 
-  // Determine the slug to use for progress storage (prefer URL slug, falls back to title-encoded)
-  const progressSlug = rawBookName || encodeURIComponent(bookName);
+  const progressSlug = bookSlug || encodeURIComponent(bookName);
 
   return (
     <ReaderUI
       bookTitle={displayTitle}
-      chapters={chapters}
+      chapterMeta={chapterMeta}
+      initialContent={initialContent}
       initialChapterNumber={targetChapter}
       bookSlug={progressSlug}
     />
